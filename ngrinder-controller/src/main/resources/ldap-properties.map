@@ -1,0 +1,4 @@
+ldap.enabled,false,
+ldap.server,,
+ldap.password,,
+ldap.base.dn,,
