@@ -1,16 +1,20 @@
 package org.ngrinder.security;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.ngrinder.common.util.PropertiesWrapper;
 import org.ngrinder.infra.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 import javax.naming.Context;
 import javax.naming.NamingException;
+import javax.naming.directory.SearchControls;
 import javax.naming.ldap.InitialLdapContext;
+import javax.naming.ldap.LdapContext;
 import java.util.Hashtable;
 
 import static org.ngrinder.common.constant.LdapConstants.*;
@@ -23,10 +27,13 @@ public class NGrinderLdapContext {
 	private static final String LDAP_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory";
 	private static final String LDAP_SIMPLE_AUTH = "Simple";
 
-
+	private final ApplicationContext applicationContext;
 	private final Config config;
 
-	private InitialLdapContext ldapContext;
+	@Getter
+	private LdapContext ldapContext;
+	@Getter
+	private SearchControls searchControls;
 
 	@PostConstruct
 	public void init() throws NamingException {
@@ -43,10 +50,14 @@ public class NGrinderLdapContext {
 		}
 
 		log.info("LDAP login is enabled");
-
-		// TODO: add ldap login plugin bean
+		applicationContext.getAutowireCapableBeanFactory().autowireBean(DefaultLdapLoginPlugin.class);
 
 		ldapContext = new InitialLdapContext(getLdapEnvironment(), null);
+
+		searchControls = new SearchControls();
+		searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE);
+		searchControls.setTimeLimit(Integer.parseInt(config.getLdapProperties().getProperty(PROP_LDAP_SEARCH_TIME_LIMIT)));
+		searchControls.setCountLimit(0);
 	}
 
 	private Hashtable<?, ?> getLdapEnvironment() {
@@ -62,4 +73,19 @@ public class NGrinderLdapContext {
 		return env;
 	}
 
+	public String getUserNameKey() {
+		return config.getLdapProperties().getProperty(PROP_LDAP_USER_DISPLAY_NAME);
+	}
+
+	public String getUserEmailKey() {
+		return config.getLdapProperties().getProperty(PROP_LDAP_USER_EMAIL);
+	}
+
+	public String getUserDN() {
+		return config.getLdapProperties().getProperty(PROP_LDAP_USER_DN, "");
+	}
+
+	public String getUserFilter() {
+		return config.getLdapProperties().getProperty(PROP_LDAP_USER_FILTER);
+	}
 }
