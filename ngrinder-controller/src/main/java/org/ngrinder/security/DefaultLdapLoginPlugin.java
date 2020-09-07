@@ -60,20 +60,37 @@ public class DefaultLdapLoginPlugin implements OnLoginRunnable {
 		try {
 
 			String searchBase = normalizeUserSearchBase(ldapContext.getBaseDN(), ldapContext.getUserSearchBase());
-			NamingEnumeration<SearchResult> enumeration = ldapContext.getLdapContext().search(searchBase, ldapContext.getUserFilter(), ldapContext.getSearchControls());
-			while (enumeration.hasMore()) {
-				SearchResult result = enumeration.next();
-				String commonName = (String) result.getAttributes().get("CN").get();
+			String searchFilter = normalizeUserSearchFilter(ldapContext.getUserFilter(), userId);
 
-				if (userId.equalsIgnoreCase(commonName)) {
-					searchResult = result;
-					break;
-				}
+			NamingEnumeration<SearchResult> enumeration = ldapContext.getLdapContext().search(searchBase, searchFilter, ldapContext.getSearchControls());
+			if (enumeration.hasMore()) {
+				searchResult = enumeration.next();
 			}
 		} catch (NamingException e) {
 			log.error("Cannot find {} in LDAP, ", userId, e);
 		}
 		return searchResult;
+	}
+
+	private String normalizeUserSearchFilter(String userFilter, String userId) {
+		if (!userFilter.startsWith("(") || !userFilter.endsWith(")")) {
+			userFilter = "(" + userFilter + ")";
+		}
+		String userIdFilter = String.format("(CN=%s)", userId);
+
+		if (isBlank(userFilter) && isBlank(userId)) {
+			return EMPTY;
+		}
+
+		if (isBlank(userFilter)) {
+			return userIdFilter;
+		}
+
+		if (isBlank(userId)) {
+			return userFilter;
+		}
+
+		return String.format("(&%s%s)", userFilter, userIdFilter);
 	}
 
 	private String normalizeUserSearchBase(String baseDN, String userSearchBase) {
