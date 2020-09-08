@@ -2,6 +2,7 @@ package org.ngrinder.security;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.ngrinder.common.exception.NGrinderRuntimeException;
 import org.ngrinder.common.util.PropertiesWrapper;
 import org.ngrinder.infra.config.Config;
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ public class NGrinderLdapContext {
 	private static final String LDAP_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory";
 	private static final String LDAP_AUTH_SIMPLE = "Simple";
 	private static final String LDAP_AUTH_NONE = "None";
+	private static final int LDAP_SEARCH_COUNT_UNLIMITED = 0;
 
 	private final ApplicationContext applicationContext;
 	private final Config config;
@@ -38,28 +40,43 @@ public class NGrinderLdapContext {
 	private SearchControls searchControls;
 
 	@PostConstruct
-	public void init() throws NamingException {
+	public void init() {
+		config.addSystemConfListener(event -> initialize());
+		initialize();
+	}
+
+	private void initialize() {
+		ldapContext = createLdapContext();
+
+		if (ldapContext != null) {
+			log.info("LDAP login is enabled");
+			applicationContext.getAutowireCapableBeanFactory().autowireBean(DefaultLdapLoginPlugin.class);
+		}
+
+		searchControls = new SearchControls();
+		searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE);
+		searchControls.setTimeLimit(Integer.parseInt(config.getLdapProperties().getProperty(PROP_LDAP_SEARCH_TIME_LIMIT)));
+		searchControls.setCountLimit(LDAP_SEARCH_COUNT_UNLIMITED);
+	}
+
+	private LdapContext createLdapContext() {
 		boolean enabled = config.getLdapProperties().getPropertyBoolean(PROP_LDAP_ENABLED, false);
 		if (!enabled) {
 			log.info("LDAP login is disabled");
-			return;
+			return null;
 		}
 
 		String serverAddress = config.getLdapProperties().getProperty(PROP_LDAP_SERVER);
 		if (serverAddress == null) {
 			log.info("LDAP server is not specified. LDAP login is disabled");
-			return;
+			return null;
 		}
 
-		log.info("LDAP login is enabled");
-		applicationContext.getAutowireCapableBeanFactory().autowireBean(DefaultLdapLoginPlugin.class);
-
-		ldapContext = new InitialLdapContext(getLdapEnvironment(), null);
-
-		searchControls = new SearchControls();
-		searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-		searchControls.setTimeLimit(Integer.parseInt(config.getLdapProperties().getProperty(PROP_LDAP_SEARCH_TIME_LIMIT)));
-		searchControls.setCountLimit(0);
+		try {
+			return new InitialLdapContext(getLdapEnvironment(), null);
+		} catch (NamingException e) {
+			throw new NGrinderRuntimeException(e);
+		}
 	}
 
 	private Hashtable<?, ?> getLdapEnvironment() {
