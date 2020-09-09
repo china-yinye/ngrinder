@@ -1,8 +1,6 @@
 package org.ngrinder.security;
 
-import com.unboundid.ldap.sdk.LDAPConnection;
-import com.unboundid.ldap.sdk.LDAPConnectionOptions;
-import lombok.Getter;
+import com.unboundid.ldap.sdk.*;
 import lombok.RequiredArgsConstructor;
 import org.ngrinder.common.exception.NGrinderRuntimeException;
 import org.ngrinder.common.util.PropertiesWrapper;
@@ -22,12 +20,12 @@ import static org.ngrinder.common.constant.LdapConstants.*;
 @RequiredArgsConstructor
 public class NGrinderLdapContext {
 	private static final Logger log = LoggerFactory.getLogger(NGrinderLdapContext.class);
+	private static final int LDAP_CONNECTION_POOL_SIZE = 4;
 
 	private final ApplicationContext applicationContext;
 	private final Config config;
 
-	@Getter
-	private LDAPConnection ldapConnection;
+	private LDAPConnectionPool ldapConnectionPool;
 
 	@PostConstruct
 	public void init() {
@@ -36,11 +34,16 @@ public class NGrinderLdapContext {
 	}
 
 	private void initialize() {
-		ldapConnection = createLdapConnection();
+		LDAPConnection ldapConnection = createLdapConnection();
+		if (ldapConnection == null) {
+			return;
+		}
 
-		if (ldapConnection != null) {
-			log.info("LDAP login is enabled");
-			applicationContext.getAutowireCapableBeanFactory().autowireBean(DefaultLdapLoginPlugin.class);
+		log.info("LDAP login is enabled");
+		try {
+			ldapConnectionPool = new LDAPConnectionPool(ldapConnection, LDAP_CONNECTION_POOL_SIZE);
+		} catch (LDAPException e) {
+			throw new NGrinderRuntimeException(e);
 		}
 	}
 
@@ -72,6 +75,24 @@ public class NGrinderLdapContext {
 				return new LDAPConnection(ldapConnectionOptions, ldapServer, ldapPort);
 			}
 		} catch (Exception e) {
+			throw new NGrinderRuntimeException(e);
+		}
+	}
+
+	public LDAPConnection getLdapConnection() {
+		try {
+			return ldapConnectionPool.getConnection();
+		} catch (LDAPException e) {
+			throw new NGrinderRuntimeException(e);
+		}
+	}
+
+	public LDAPConnection getLdapConnection(String userId, String userPassword) {
+		try {
+			LDAPConnection connection = ldapConnectionPool.getConnection();
+			connection.bind(new SimpleBindRequest(userId, userPassword));
+			return connection;
+		} catch (LDAPException e) {
 			throw new NGrinderRuntimeException(e);
 		}
 	}

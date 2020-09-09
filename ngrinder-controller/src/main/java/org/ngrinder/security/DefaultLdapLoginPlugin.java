@@ -5,8 +5,10 @@ import lombok.RequiredArgsConstructor;
 import org.ngrinder.extension.OnLoginRunnable;
 import org.ngrinder.model.Role;
 import org.ngrinder.model.User;
+import org.ngrinder.user.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Component;
 
 import static org.apache.commons.lang.StringUtils.EMPTY;
@@ -18,6 +20,8 @@ public class DefaultLdapLoginPlugin implements OnLoginRunnable {
 	private static final Logger log = LoggerFactory.getLogger(DefaultLdapLoginPlugin.class);
 
 	private final NGrinderLdapContext ldapContext;
+
+	private final UserService userService;
 
 	@Override
 	public User loadUser(String userId) {
@@ -38,6 +42,13 @@ public class DefaultLdapLoginPlugin implements OnLoginRunnable {
 		user.setEnabled(true);
 		user.setExternal(true);
 		user.setRole(Role.USER);
+
+		User foundOne = userService.getOne(userId);
+		if (foundOne != null) {
+			user.setId(foundOne.getId());
+			userService.saveWithoutPasswordEncoding(user);
+		}
+
 		return user;
 	}
 
@@ -99,8 +110,17 @@ public class DefaultLdapLoginPlugin implements OnLoginRunnable {
 
 	@Override
 	public boolean validateUser(String userId, String password, String encPass, Object encoder, Object salt) {
-		// TODO: validate user with LDAP
-		return false;
+		if (!ldapContext.isEnabled()) {
+			throw new BadCredentialsException("LDAP login is disabled");
+		}
+
+		Entry userEntry = getUserFromLDAP(userId);
+		try {
+			LDAPConnection authConnection = ldapContext.getLdapConnection(userEntry.getDN(), password);
+			return authConnection.isConnected();
+		} catch (Exception e) {
+			throw new BadCredentialsException("Invalid LDAP credential", e);
+		}
 	}
 
 	@Deprecated
