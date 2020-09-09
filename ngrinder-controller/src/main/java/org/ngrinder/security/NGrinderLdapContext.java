@@ -1,5 +1,7 @@
 package org.ngrinder.security;
 
+import com.unboundid.ldap.sdk.LDAPConnection;
+import com.unboundid.ldap.sdk.LDAPConnectionOptions;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.ngrinder.common.exception.NGrinderRuntimeException;
@@ -11,13 +13,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
-import javax.naming.Context;
-import javax.naming.NamingException;
-import javax.naming.directory.SearchControls;
-import javax.naming.ldap.InitialLdapContext;
-import javax.naming.ldap.LdapContext;
-import java.util.Hashtable;
 
+import static org.apache.commons.lang.StringUtils.isEmpty;
 import static org.apache.commons.lang.StringUtils.isNotEmpty;
 import static org.ngrinder.common.constant.LdapConstants.*;
 
@@ -26,18 +23,11 @@ import static org.ngrinder.common.constant.LdapConstants.*;
 public class NGrinderLdapContext {
 	private static final Logger log = LoggerFactory.getLogger(NGrinderLdapContext.class);
 
-	private static final String LDAP_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory";
-	private static final String LDAP_AUTH_SIMPLE = "Simple";
-	private static final String LDAP_AUTH_NONE = "None";
-	private static final int LDAP_SEARCH_COUNT_UNLIMITED = 0;
-
 	private final ApplicationContext applicationContext;
 	private final Config config;
 
 	@Getter
-	private LdapContext ldapContext;
-	@Getter
-	private SearchControls searchControls;
+	private LDAPConnection ldapConnection;
 
 	@PostConstruct
 	public void init() {
@@ -46,57 +36,48 @@ public class NGrinderLdapContext {
 	}
 
 	private void initialize() {
-		ldapContext = createLdapContext();
+		ldapConnection = createLdapConnection();
 
-		if (ldapContext != null) {
+		if (ldapConnection != null) {
 			log.info("LDAP login is enabled");
 			applicationContext.getAutowireCapableBeanFactory().autowireBean(DefaultLdapLoginPlugin.class);
 		}
-
-		searchControls = new SearchControls();
-		searchControls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-		searchControls.setTimeLimit(Integer.parseInt(config.getLdapProperties().getProperty(PROP_LDAP_SEARCH_TIME_LIMIT)));
-		searchControls.setCountLimit(LDAP_SEARCH_COUNT_UNLIMITED);
 	}
 
-	private LdapContext createLdapContext() {
-		boolean enabled = config.getLdapProperties().getPropertyBoolean(PROP_LDAP_ENABLED, false);
-		if (!enabled) {
+	private LDAPConnection createLdapConnection() {
+		if (!isEnabled()) {
 			log.info("LDAP login is disabled");
 			return null;
 		}
 
-		String serverAddress = config.getLdapProperties().getProperty(PROP_LDAP_SERVER);
-		if (serverAddress == null) {
+		PropertiesWrapper properties = config.getLdapProperties();
+
+		String ldapServer = properties.getProperty(PROP_LDAP_SERVER, "").replace("ldap://", "");
+		if (isEmpty(ldapServer)) {
 			log.info("LDAP server is not specified. LDAP login is disabled");
 			return null;
 		}
 
+		int ldapPort = properties.getPropertyInt(PROP_LDAP_PORT);
+		String managerDn = properties.getProperty(PROP_LDAP_MANAGER_DN);
+		String managerPassword = properties.getProperty(PROP_LDAP_MANAGER_PASSWORD);
+
+		LDAPConnectionOptions ldapConnectionOptions = new LDAPConnectionOptions();
+		ldapConnectionOptions.setResponseTimeoutMillis(properties.getPropertyInt(PROP_LDAP_RESPONSE_TIMEOUT));
+
 		try {
-			return new InitialLdapContext(getLdapEnvironment(), null);
-		} catch (NamingException e) {
+			if (isNotEmpty(managerDn) && isNotEmpty(managerPassword)) {
+				return new LDAPConnection(ldapConnectionOptions, ldapServer, ldapPort, managerDn, managerPassword);
+			} else {
+				return new LDAPConnection(ldapConnectionOptions, ldapServer, ldapPort);
+			}
+		} catch (Exception e) {
 			throw new NGrinderRuntimeException(e);
 		}
 	}
 
-	private Hashtable<?, ?> getLdapEnvironment() {
-		PropertiesWrapper ldapProperties = config.getLdapProperties();
-		Hashtable<String, String> env = new Hashtable<>();
-
-		env.put(Context.PROVIDER_URL, ldapProperties.getProperty(PROP_LDAP_SERVER));
-		env.put(Context.INITIAL_CONTEXT_FACTORY, LDAP_FACTORY);
-		env.put(Context.SECURITY_AUTHENTICATION, LDAP_AUTH_NONE);
-
-		String managerDn = ldapProperties.getProperty(PROP_LDAP_MANAGER_DN);
-		String managerPassword = ldapProperties.getProperty(PROP_LDAP_MANAGER_PASSWORD);
-
-		if (isNotEmpty(managerDn) && isNotEmpty(managerPassword)) {
-			env.put(Context.SECURITY_AUTHENTICATION, LDAP_AUTH_SIMPLE);
-			env.put(Context.SECURITY_PRINCIPAL, managerDn);
-			env.put(Context.SECURITY_CREDENTIALS, managerPassword);
-		}
-
-		return env;
+	public boolean isEnabled() {
+		return config.getLdapProperties().getPropertyBoolean(PROP_LDAP_ENABLED, false);
 	}
 
 	public String getUserNameKey() {
