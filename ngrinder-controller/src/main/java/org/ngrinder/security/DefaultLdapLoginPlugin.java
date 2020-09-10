@@ -46,6 +46,7 @@ public class DefaultLdapLoginPlugin implements OnLoginRunnable {
 		User foundOne = userService.getOne(userId);
 		if (foundOne != null) {
 			user.setId(foundOne.getId());
+			user.setRole(foundOne.getRole());
 			userService.saveWithoutPasswordEncoding(user);
 		}
 
